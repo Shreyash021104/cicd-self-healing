@@ -36,7 +36,7 @@ reduces real on-call pain — is what happens **after** the deploy:
 ## Architecture
 
 ```
-  git push ─► GitHub Actions CI (lint + test + build)  ── the "CI" half
+  git push ─► GitHub Actions CI (lint + test + docker build → GHCR)  ── the "CI" half
                         │  (artifact / version)
                         ▼
              Deployment Controller  ── the "CD + self-healing" half
@@ -115,12 +115,25 @@ On the dashboard: **Deploy healthy build** (watch the rolling update), **Deploy 
 (watch readiness pass, the smoke test fail, and the automatic rollback), and **Crash a replica**
 (watch the monitor self-heal it).
 
+## The CI half (GitHub Actions)
+
+`.github/workflows/ci.yml` runs two jobs on every push/PR:
+
+- **build-test** — **enforced** lint (`ruff`, fails the build on violations), a compile check,
+  and the rollout/rollback/self-healing test suite against a Postgres service container.
+- **docker** — builds the deployable artifact from a **multi-stage `Dockerfile`** and, on pushes
+  to `main`, publishes it to the **GitHub Container Registry** (`ghcr.io/<repo>:latest` and
+  `:<sha>`), with layer caching. PRs build the image (validating the Dockerfile) without pushing.
+
+So the "build → test → package → publish" half of a real CI/CD pipeline is genuinely here; what's
+simulated (for lack of a cluster) is the *deploy target* — handled by the controller below.
+
 ## What I'd change to make it "real Kubernetes"
 
-- **Run on Kubernetes**: package the sample app as a **Docker multi-stage build**, push to GHCR,
-  and deploy with a `Deployment` (rolling `maxSurge`/`maxUnavailable`, readiness/liveness probes);
-  the controller's smoke-test-and-rollback becomes a CI job running `kubectl rollout status` +
-  `kubectl rollout undo` on failure. The state machine here maps 1:1.
+- **Deploy the published image to a cluster**: the image is already built and pushed to GHCR, so
+  the remaining step is a `Deployment` (rolling `maxSurge`/`maxUnavailable`, readiness/liveness
+  probes) plus a CI job running `kubectl rollout status` + `kubectl rollout undo` on a failed
+  smoke test — which is exactly the controller's logic, expressed against a real cluster.
 - **Canary / blue-green**: shift a small % of traffic to the new version first and watch error
   rate before full rollout (a stretch the current all-or-nothing rollout doesn't do).
 - **Deploy-correlated observability**: Prometheus + Grafana to answer "did error rate spike right

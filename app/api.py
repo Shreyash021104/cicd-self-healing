@@ -4,13 +4,12 @@ self-healing in real time."""
 from __future__ import annotations
 
 import threading
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .config import cfg

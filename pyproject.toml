@@ -9,3 +9,11 @@ dev = ["pytest"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Core, non-opinionated rules: pyflakes (F), pycodestyle (E/W), import sorting (I).
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]   # long lines are readable here; not worth churning
