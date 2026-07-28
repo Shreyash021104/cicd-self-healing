@@ -68,6 +68,11 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # GHCR (and Docker) repository names must be lowercase, but the owner login
+      # can contain capitals — lowercase the full image name here.
+      - name: Compute lowercase image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       # Log in to GHCR only on pushes to main (PRs from forks can't access secrets).
       - name: Log in to GHCR
         if: github.event_name == 'push'
@@ -84,7 +89,7 @@ jobs:
           # PRs build only (validates the Dockerfile); pushes to main also publish.
           push: ${{ github.event_name == 'push' }}
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
