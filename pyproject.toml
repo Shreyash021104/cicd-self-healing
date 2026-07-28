@@ -1,0 +1,11 @@
+[project]
+name = "cicd-self-healing"
+version = "1.0.0"
+description = "A CI/CD pipeline with self-healing deployments: a mini-Kubernetes rollout controller doing rolling updates with readiness probes, post-deploy smoke tests, and automatic rollback."
+requires-python = ">=3.11"
+dependencies = ["fastapi","uvicorn[standard]","psycopg[binary]","psycopg_pool","httpx","pydantic"]
+[project.optional-dependencies]
+dev = ["pytest"]
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

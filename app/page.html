@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Helm — Self-Healing Deployments</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141922; --border:#232a36; --fg:#e6e9ef; --muted:#8a93a6;
+          --green:#6ee7b7; --blue:#4f8cff; --amber:#f5a623; --red:#ff5c5c; --purple:#b392f0; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { padding:16px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:18px; margin:0; } .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);}
+  .wrap { padding:24px; max-width:1100px; margin:0 auto; }
+  .row{display:grid;grid-template-columns:1fr 2fr;gap:20px;} @media(max-width:820px){.row{grid-template-columns:1fr;}}
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:20px; }
+  .panel h2 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:0 0 14px; }
+  .ver{font-size:34px;font-weight:800;} .sub{color:var(--muted);font-size:13px;}
+  .health{font-size:22px;font-weight:700;margin-top:10px;}
+  .bar{display:flex;gap:6px;margin-top:10px;} .rep{flex:1;height:10px;border-radius:3px;background:#2a3446;}
+  .rep.ok{background:var(--green);} .rep.bad{background:var(--red);}
+  button{border:0;border-radius:9px;padding:11px 14px;font-weight:600;cursor:pointer;font-size:13px;margin:4px 6px 4px 0;}
+  .b-good{background:var(--green);color:#04120c;} .b-bad{background:var(--amber);color:#1a1200;} .b-crash{background:#2a3446;color:var(--fg);}
+  button:disabled{opacity:.5;cursor:default;}
+  .feed{max-height:360px;overflow:auto;} .ev{display:flex;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .ev .t{color:var(--muted);font-family:ui-monospace,monospace;white-space:nowrap;} .ev .m{flex:1;}
+  .ev.heal .m{color:var(--purple);} .ev.rb .m{color:var(--red);} .ev.ok .m{color:var(--green);}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;} th,td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;}
+  .badge{font-weight:700;font-size:10px;padding:2px 7px;border-radius:6px;text-transform:uppercase;}
+  .s-deployed{color:var(--green);background:rgba(110,231,183,.14);} .s-rolled_back{color:var(--red);background:rgba(255,92,92,.14);} .s-deploying{color:var(--blue);background:rgba(79,140,255,.14);}
+  #msg{margin-left:8px;color:var(--muted);font-size:13px;}
+</style>
+</head>
+<body>
+<header><span class="dot"></span><h1>Helm</h1><span style="color:var(--muted)">self-healing deployment controller</span></header>
+<div class="wrap">
+  <div class="row">
+    <div>
+      <div class="panel">
+        <h2>Live deployment</h2>
+        <div class="ver" id="ver">—</div>
+        <div class="sub">current version</div>
+        <div class="health" id="health">—</div>
+        <div class="bar" id="bar"></div>
+      </div>
+      <div class="panel">
+        <h2>Actions</h2>
+        <button class="b-good" id="good">Deploy healthy build</button>
+        <button class="b-bad" id="bad">Deploy broken build</button>
+        <button class="b-crash" id="crash">Crash a replica</button>
+        <div id="msg"></div>
+      </div>
+      <div class="panel">
+        <h2>Deployment history</h2>
+        <table><thead><tr><th>Ver</th><th>Status</th><th>Note</th></tr></thead><tbody id="hist"></tbody></table>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Rollout timeline</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s)=>(s==null?"":String(s)).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+async function refresh() {
+  const s = await (await fetch("/api/status")).json();
+  $("ver").textContent = s.status.version || "—";
+  $("health").textContent = `${s.status.healthy} / ${s.status.desired} replicas healthy`;
+  $("health").style.color = (s.status.healthy===s.status.desired && s.status.version) ? "var(--green)" : "var(--amber)";
+  let bar = ""; for (let i=0;i<s.status.desired;i++) bar += `<div class="rep ${i<s.status.healthy?'ok':'bad'}"></div>`;
+  $("bar").innerHTML = bar;
+  $("hist").innerHTML = s.history.map(h=>`<tr><td class="mono">${esc(h.version)}</td>
+    <td><span class="badge s-${h.status}">${esc(h.status)}</span></td>
+    <td style="color:var(--muted)">${esc(h.note||"")}</td></tr>`).join("");
+  $("feed").innerHTML = s.events.map(e=>{
+    const cls = e.kind==="heal" ? "heal" : (/rolled back|FAILED|failed/.test(e.message) ? "rb" : (/succeeded|healthy/.test(e.message)?"ok":""));
+    const t = new Date(e.ts).toLocaleTimeString();
+    return `<div class="ev ${cls}"><span class="t">${t}</span><span class="m">${esc(e.message)}</span></div>`;
+  }).join("");
+}
+
+async function act(url, body, label) {
+  ["good","bad","crash"].forEach(id=>$(id).disabled=true);
+  $("msg").textContent = label;
+  try { await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body: body?JSON.stringify(body):null}); }
+  finally { ["good","bad","crash"].forEach(id=>$(id).disabled=false); $("msg").textContent=""; await refresh(); }
+}
+$("good").onclick = () => act("/api/deploy", {broken:false}, "deploying healthy build…");
+$("bad").onclick = () => act("/api/deploy", {broken:true}, "deploying broken build (watch it roll back)…");
+$("crash").onclick = () => act("/api/crash", null, "crashing a replica…");
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

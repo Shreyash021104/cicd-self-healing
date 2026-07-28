@@ -1,0 +1,56 @@
+name: CI
+
+# This is the "CI" half of the project — build/lint/test on every push and PR.
+# The "CD + self-healing" half is the deployment controller in app/, which does
+# rolling updates, smoke tests, and automatic rollback (see README).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/deploydb
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest ruff
+
+      - name: Lint
+        run: ruff check app || true   # advisory; keep the pipeline honest without blocking on style
+
+      - name: Compile check
+        run: python -m compileall -q app scripts
+
+      - name: Create database + schema
+        run: python scripts/migrate.py
+
+      - name: Test (rollout, rollback, self-healing state machine)
+        run: python -m pytest -q
